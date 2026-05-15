@@ -2,22 +2,23 @@
 CAPTCHA solving module using CapSolver API.
 TikTok uses FunCaptcha (Arkose Labs) for signup protection.
 """
- 
+
 import asyncio
 import httpx
 from config import Config
- 
- 
+from logger import log
+
+
 class CaptchaSolver:
     BASE_URL = "https://api.capsolver.com"
- 
+
     def __init__(self):
         self.api_key = Config.CAPSOLVER_API_KEY
         if not self.api_key:
             raise ValueError(
                 "CAPSOLVER_API_KEY not set. Sign up at https://www.capsolver.com/"
             )
- 
+
     async def solve_funcaptcha(self, public_key: str, page_url: str, blob: str = "") -> str | None:
         """
         Solve TikTok's FunCaptcha (Arkose Labs).
@@ -33,19 +34,19 @@ class CaptchaSolver:
         }
         if blob:
             task_payload["task"]["data"] = '{"blob":"' + blob + '"}'
- 
+
         async with httpx.AsyncClient(timeout=30) as client:
             # Create task
             resp = await client.post(f"{self.BASE_URL}/createTask", json=task_payload)
             result = resp.json()
- 
+
             if result.get("errorId", 1) != 0:
-                print(f"  CAPTCHA create error: {result.get('errorDescription', 'unknown')}")
+                log.error("CAPTCHA create error: %s", result.get("errorDescription", "unknown"))
                 return None
- 
+
             task_id = result["taskId"]
-            print(f"  CAPTCHA task created: {task_id}")
- 
+            log.info("CAPTCHA task created: %s", task_id)
+
             # Poll for result
             for _ in range(Config.CAPTCHA_SOLVE_TIMEOUT // 3):
                 await asyncio.sleep(3)
@@ -55,18 +56,18 @@ class CaptchaSolver:
                 )
                 result = resp.json()
                 status = result.get("status", "")
- 
+
                 if status == "ready":
                     token = result.get("solution", {}).get("token", "")
-                    print("  CAPTCHA solved!")
+                    log.info("CAPTCHA solved!")
                     return token
                 elif status == "failed":
-                    print(f"  CAPTCHA failed: {result.get('errorDescription', 'unknown')}")
+                    log.error("CAPTCHA failed: %s", result.get("errorDescription", "unknown"))
                     return None
- 
-            print("  CAPTCHA solve timeout")
+
+            log.warning("CAPTCHA solve timeout")
             return None
- 
+
     async def solve_slider_captcha(self, page) -> bool:
         """
         Attempt to solve TikTok's slider/puzzle CAPTCHA via browser interaction.
@@ -80,25 +81,24 @@ class CaptchaSolver:
             )
             if not puzzle:
                 return False
- 
+
             # Look for the slider handle
             slider = await page.query_selector(
                 'div[class*="slider--handle"], div[class*="secsdk-captcha-drag-icon"]'
             )
             if not slider:
-                print("  No slider handle found")
+                log.warning("No slider handle found")
                 return False
- 
+
             # Get slider position
             box = await slider.bounding_box()
             if not box:
                 return False
- 
+
             # Drag the slider across — this is a basic attempt
-            # Real CAPTCHA solving would need image analysis
             start_x = box["x"] + box["width"] / 2
             start_y = box["y"] + box["height"] / 2
- 
+
             await page.mouse.move(start_x, start_y)
             await page.mouse.down()
             # Move in steps to simulate human behavior
@@ -107,13 +107,13 @@ class CaptchaSolver:
                 await asyncio.sleep(0.05)
             await page.mouse.up()
             await asyncio.sleep(2)
- 
+
             # Check if CAPTCHA disappeared
             remaining = await page.query_selector(
                 'div[class*="captcha"], #captcha-verify-image'
             )
             return remaining is None
- 
+
         except Exception as e:
-            print(f"  Slider CAPTCHA error: {e}")
+            log.error("Slider CAPTCHA error: %s", e)
             return False

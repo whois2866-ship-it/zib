@@ -6,3 +6,6 @@ proxies.txt
 .venv/
 venv/
 *.log
+logs/
+debug_*.png
+emails.txt
